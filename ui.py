@@ -45,6 +45,10 @@ class GameUI:
         self.rects = []
 
         self.updating = False
+        # keep previous grid snapshot to avoid redrawing unchanged cells
+        self.prev_grid = None
+        # last grid timestamp seen by UI
+        self._last_grid_ts = 0.0
 
     def on_connect(self):
         if self.client is not None and self.client.state == 'connected':
@@ -62,8 +66,9 @@ class GameUI:
         self.connect_btn.config(state='disabled')
         self.build_grid()
         self.updating = True
-        # update UI every second to display ping and loss consistently
-        self.root.after(1000, self.update_loop)
+        # start separated update loops: game updates (50ms) and stats (1s)
+        self.root.after(50, self.update_game_loop)
+        self.root.after(1000, self.update_stats_loop)
 
     def build_grid(self):
         if self.grid_frame:
@@ -93,8 +98,12 @@ class GameUI:
                 y0 = r * CELL_SIZE
                 x1 = x0 + CELL_SIZE
                 y1 = y0 + CELL_SIZE
+                # remove rectangle outlines for faster rendering
                 rect = self.canvas.create_rectangle(x0, y0, x1, y1, fill=COLOR_MAP[0], outline='black')
                 self.rects[r][c] = rect
+
+        # initialize previous grid snapshot as empty to force initial draw
+        self.prev_grid = [[None for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
         self.canvas.bind('<Button-1>', self.on_canvas_click)
 
@@ -105,15 +114,18 @@ class GameUI:
         r = event.y // CELL_SIZE
         if 0 <= r < GRID_SIZE and 0 <= c < GRID_SIZE:
             # send action via client
-            try:
-                self.client.send_action(r, c)
-            except Exception as e:
-                print('Send action failed:', e)
+            # send on background thread so UI won't block if send stalls
+            def _send():
+                try:
+                    self.client.send_action(r, c)
+                except Exception as e:
+                    print('Send action failed:', e)
+            threading.Thread(target=_send, daemon=True).start()
 
-    def update_loop(self):
+    def update_stats_loop(self):
         if not self.updating:
             return
-        # update state text
+        # update state text and stats (runs every 1s)
         state_text = 'State: '
         if self.client:
             state_text += self.client.state
@@ -121,29 +133,46 @@ class GameUI:
             state_text += 'not connected'
         self.state_label.config(text=state_text)
 
-        # update stats (ping & packet loss) in top-left
         if self.client:
             ping = self.client.ping_ms
             with self.client.recv_stats_lock:
-                total = self.client.packets_received + self.client.packets_lost
-                loss_pct = 0.0
-                if total > 0:
-                    loss_pct = (self.client.packets_lost / total) * 100
+                packets_received = self.client.packets_received
+                packets_lost = self.client.packets_lost
+            total = packets_received + packets_lost
+            loss_pct = 0.0
+            if total > 0:
+                loss_pct = (packets_lost / total) * 100
             stats_str = f'Ping: {ping:.1f}ms | Loss: {loss_pct:.1f}%'
             self.stats_text.set(stats_str)
 
-        # update grid from client data
-        if self.client:
-            grid = self.client.grid
-            for r in range(GRID_SIZE):
-                for c in range(GRID_SIZE):
-                    owner = grid[r][c]
-                    color = COLOR_MAP.get(owner, COLOR_MAP[0])
-                    rect = self.rects[r][c]
-                    self.canvas.itemconfig(rect, fill=color)
+        # schedule next stats update in 1 second
+        self.root.after(1000, self.update_stats_loop)
 
-        # schedule next update in 1 second
-        self.root.after(1000, self.update_loop)
+    def update_game_loop(self):
+        #if not self.updating:
+            #return
+        # update grid from client data — only redraw cells when a new snapshot arrived
+        if self.client and self.prev_grid is not None:
+            last_ts = getattr(self.client, 'last_grid_update', 0.0)
+            if last_ts and last_ts > self._last_grid_ts:
+                grid = self.client.grid
+                rects = self.rects
+                cmap = COLOR_MAP
+                default = COLOR_MAP[0]
+                for r in range(GRID_SIZE):
+                    prow = self.prev_grid[r]
+                    grow = grid[r]
+                    rrects = rects[r]
+                    for c in range(GRID_SIZE):
+                        owner = grow[c]
+                        if prow[c] != owner:
+                            color = cmap.get(owner, default)
+                            self.canvas.itemconfig(rrects[c], fill=color)
+                            prow[c] = owner
+                self._last_grid_ts = last_ts
+
+        # schedule next game update in 50 ms
+        self.root.after(50, self.update_game_loop)
 
 
 if __name__ == '__main__':

@@ -57,6 +57,9 @@ class Client:
         # Grid (configurable size)
         self.grid = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
+        # timestamp (seconds) of last grid update received from server
+        self.last_grid_update = 0.0
+
         # action buffer (kept for completeness)
         self.actions = []
         logger.info(f'created client; server={self.server_addr} grid={GRID_SIZE}x{GRID_SIZE}')
@@ -231,6 +234,9 @@ class Client:
                                 self.grid[row][col] = player_id
                     except Exception:
                         pass
+
+                # mark when we last applied a grid snapshot so UI can redraw promptly
+                self.last_grid_update = time.time()
 
                 logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
 
