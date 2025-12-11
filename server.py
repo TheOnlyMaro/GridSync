@@ -4,7 +4,7 @@ import time
 import threading
 from util import pack_header, pack_actions_payload, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from game import GridGame
-from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT, PACKET_LIFETIME
+from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT, PACKET_LIFETIME, MAX_PLAYERS
 
 SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
 
@@ -36,6 +36,10 @@ def handle_client(sock):
             if addr not in clients:
                 # Only register new client on explicit INIT message
                 if msg_type != MSG_INIT:
+                    continue
+                # Check if we've reached max players
+                if len(clients) >= MAX_PLAYERS:
+                    print(f"[SERVER] INIT from {addr} rejected: max players ({MAX_PLAYERS}) reached")
                     continue
                 # Register new client with dictionary structure
                 player_id = next_player_id
@@ -89,8 +93,10 @@ def handle_client(sock):
                 if msg_type == MSG_ACTION:
                     # Expecting row,col starting at header length (28)
                     row, col = struct.unpack("!HH", data[28:32])
-                    # Apply via game logic
-                    if game.apply_action(player_id, row, col):
+                    # Check if cell is empty (player_id == 0) before allowing action
+                    if game.grid[row][col] != 0:
+                        print(f"[SERVER] ACTION rejected from Player {player_id} → Cell ({row},{col}) occupied")
+                    elif game.apply_action(player_id, row, col):
                         print(f"[SERVER] ACTION from Player {player_id} → Cell ({row},{col})")
                     else:
                         print(f"[SERVER] Invalid cell ({row},{col}) from Player {player_id}")

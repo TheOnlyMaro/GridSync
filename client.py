@@ -4,6 +4,11 @@ import threading
 import time
 from util import pack_header, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE, PACKET_LIFETIME
+import logging
+
+# configure client console logging so UI runs print client logs to the terminal
+logging.basicConfig(level=logging.INFO, format='[CLIENT] %(message)s')
+logger = logging.getLogger('gsyn.client')
 
 SERVER_ADDR = (CLIENT_SERVER_HOST, CLIENT_SERVER_PORT)
 
@@ -28,16 +33,45 @@ class Client:
         # track last received seq to drop duplicates or replays
         self.last_seq_received = 0
         self.last_recv_timestamp_ms = 0
+        # track last received snapshot_id to drop redundant snapshots
+        self.last_snapshot_id = 0
+
+        # ===== PING & PACKET LOSS TRACKING =====
+        # track sent packets for ping measurement: seq -> timestamp (ms)
+        self.sent_packets = {}
+        self.sent_packets_lock = threading.Lock()
+        # rolling ping stats (ms)
+        self.ping_ms = 0.0
+        self.ping_samples = []  # keep last 10 samples
+        # packet loss tracking: expect next seq from server
+        self.expected_next_recv_seq = 1
+        self.packets_lost = 0  # count of lost packets
+        self.packets_received = 0  # count of received packets
+        self.recv_stats_lock = threading.Lock()
 
         # Grid (configurable size)
         self.grid = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
         # action buffer (kept for completeness)
         self.actions = []
+        logger.info(f'created client; server={self.server_addr} grid={GRID_SIZE}x{GRID_SIZE}')
 
     def _send(self, data):
         try:
             self.sock.sendto(data, self.server_addr)
+            # track sent packet for ping measurement
+            try:
+                if len(data) >= 14:
+                    seq = struct.unpack('!I', data[10:14])[0]
+                    now_ms = int(time.time() * 1000)
+                    with self.sent_packets_lock:
+                        self.sent_packets[seq] = now_ms
+                    msg_type = data[5]
+                    logger.info(f'sent msg_type={msg_type} seq={seq} bytes={len(data)}')
+                else:
+                    logger.info(f'sent {len(data)} bytes')
+            except Exception:
+                logger.info(f'sent {len(data)} bytes')
         except Exception:
             pass
 
@@ -46,6 +80,7 @@ class Client:
             s = self.seq
             self.seq += 1
         header = pack_header(MSG_INIT, 0, s, 0)
+        logger.info(f'sending INIT seq={s}')
         self._send(header)
         self.state = 'connecting'
 
@@ -57,6 +92,7 @@ class Client:
             self.seq += 1
         payload = struct.pack("!HH", row, col)
         header = pack_header(MSG_ACTION, 0, s, len(payload))
+        logger.info(f'sending ACTION seq={s} row={row} col={col}')
         self._send(header + payload)
 
     def send_ack(self):
@@ -64,6 +100,7 @@ class Client:
             s = self.seq
             self.seq += 1
         header = pack_header(MSG_ACK, 0, s, 0)
+        logger.info(f'sending ACK seq={s}')
         self._send(header)
 
     def start(self):
@@ -96,6 +133,7 @@ class Client:
                 continue
             ok, reason = check_auth(data[:28])
             if not ok:
+                logger.warning(f'packet rejected: {reason}')
                 continue
             msg_type = data[5]
             snapshot_id = struct.unpack("!I", data[6:10])[0]
@@ -104,24 +142,57 @@ class Client:
 
             # drop old/duplicate seqs
             if seq_num <= self.last_seq_received:
+                logger.info(f'dropping packet seq={seq_num} <= last_seq={self.last_seq_received}')
                 continue
 
             # drop stale packets
             now_ms = int(time.time() * 1000)
             if now_ms - timestamp_ms > int(PACKET_LIFETIME * 1000):
+                logger.info(f'dropping packet seq={seq_num} stale by {now_ms - timestamp_ms}ms')
                 continue
 
             # accept this packet and update last seen seq
             self.last_seq_received = seq_num
             self.last_recv_timestamp_ms = timestamp_ms
 
+            # ===== PING & LOSS TRACKING =====
+            # detect packet loss by checking for gaps in seq_num
+            with self.recv_stats_lock:
+                if seq_num > self.expected_next_recv_seq:
+                    # gap detected: count missing packets as lost
+                    gap = seq_num - self.expected_next_recv_seq
+                    self.packets_lost += gap
+                    logger.info(f'packet loss detected: gap of {gap} (expected {self.expected_next_recv_seq}, got {seq_num})')
+                self.expected_next_recv_seq = seq_num + 1
+                self.packets_received += 1
+
+            # measure ping for ACKs
+            if msg_type == MSG_ACK:
+                with self.sent_packets_lock:
+                    if seq_num in self.sent_packets:
+                        sent_time = self.sent_packets.pop(seq_num)
+                        ping = int(time.time() * 1000) - sent_time
+                        self.ping_samples.append(ping)
+                        if len(self.ping_samples) > 10:
+                            self.ping_samples.pop(0)
+                        self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
+                        logger.info(f'ping: {ping}ms (avg: {self.ping_ms:.1f}ms)')
+
             if msg_type == MSG_ACK:
                 # server acknowledged our INIT or ACK
                 self.state = 'connected'
                 self.last_heartbeat_ack = time.time()
-                # print("[CLIENT] ACK received — connected")
+                logger.info(f'ACK received seq={seq_num}')
 
             elif msg_type == MSG_SNAPSHOT:
+                # drop redundant snapshots (same or older snapshot_id)
+                if snapshot_id <= self.last_snapshot_id:
+                    logger.info(f'dropping SNAPSHOT id={snapshot_id} <= last_id={self.last_snapshot_id}')
+                    continue
+
+                # update last snapshot_id
+                self.last_snapshot_id = snapshot_id
+
                 # parse payload: starts at offset 28
                 payload_len = struct.unpack("!H", data[22:24])[0]
                 payload = data[28:28+payload_len] if payload_len > 0 else b''
@@ -139,6 +210,8 @@ class Client:
                     except Exception:
                         pass
 
+                logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
+
                 # if we are not currently connected, send ACK to request re-activation
                 if self.state != 'connected':
                     self.send_ack()
@@ -146,6 +219,7 @@ class Client:
             elif msg_type == MSG_HEARTBEAT:
                 # reply with ACK
                 self.last_heartbeat_ack = time.time()
+                logger.info(f'HEARTBEAT received seq={seq_num} — sending ACK')
                 self.send_ack()
 
     def _heartbeat_loop(self):

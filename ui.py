@@ -70,6 +70,11 @@ class GameUI:
         self.grid_frame = tk.Frame(self.root)
         self.grid_frame.pack(padx=10, pady=10)
 
+        # Create top-left stats display (ping & packet loss)
+        self.stats_text = tk.StringVar(value='Ping: -- | Loss: --%')
+        self.stats_label = tk.Label(self.grid_frame, textvariable=self.stats_text, fg='white', bg='black', font=('mono', 9), justify='left')
+        self.stats_label.place(x=5, y=5)
+
         self.canvas = tk.Canvas(self.grid_frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg='white')
         self.canvas.pack()
 
@@ -107,6 +112,17 @@ class GameUI:
         else:
             state_text += 'not connected'
         self.state_label.config(text=state_text)
+
+        # update stats (ping & packet loss) in top-left
+        if self.client:
+            ping = self.client.ping_ms
+            with self.client.recv_stats_lock:
+                total = self.client.packets_received + self.client.packets_lost
+                loss_pct = 0.0
+                if total > 0:
+                    loss_pct = (self.client.packets_lost / total) * 100
+            stats_str = f'Ping: {ping:.1f}ms | Loss: {loss_pct:.1f}%'
+            self.stats_text.set(stats_str)
 
         # update grid from client data
         if self.client:

@@ -24,6 +24,7 @@ LAST_K_ACTIONS = 20  # number of recent actions to include in snapshots
 
 # ========== GRID CONFIGURATION ==========
 GRID_SIZE = 25  # 20x20 grid
+MAX_PLAYERS = 4  # maximum number of concurrent players
 
 # ========== SOCKET CONFIGURATION ==========
 SOCKET_TIMEOUT = 0.5  # seconds; socket timeout for recv operations
