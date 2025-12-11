@@ -31,3 +31,6 @@ SOCKET_BUFFER_SIZE = 2048  # bytes; UDP receive buffer size
 
 # ========== UDP RECEIVE BUFFER ==========
 MAX_RECV_SIZE = 4096  # bytes; max data size to receive per recvfrom call
+
+# How old (in seconds) a packet can be before being considered stale and dropped
+PACKET_LIFETIME = 5.0  # seconds

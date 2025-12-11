@@ -3,7 +3,7 @@ import struct
 import threading
 import time
 from util import pack_header, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
-from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE
+from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE, PACKET_LIFETIME
 
 SERVER_ADDR = (CLIENT_SERVER_HOST, CLIENT_SERVER_PORT)
 
@@ -25,6 +25,9 @@ class Client:
 
         self.last_heartbeat_ack = 0.0
         self.last_recv_time = 0.0
+        # track last received seq to drop duplicates or replays
+        self.last_seq_received = 0
+        self.last_recv_timestamp_ms = 0
 
         # Grid (configurable size)
         self.grid = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
@@ -97,6 +100,20 @@ class Client:
             msg_type = data[5]
             snapshot_id = struct.unpack("!I", data[6:10])[0]
             seq_num = struct.unpack("!I", data[10:14])[0]
+            timestamp_ms = struct.unpack("!Q", data[14:22])[0]
+
+            # drop old/duplicate seqs
+            if seq_num <= self.last_seq_received:
+                continue
+
+            # drop stale packets
+            now_ms = int(time.time() * 1000)
+            if now_ms - timestamp_ms > int(PACKET_LIFETIME * 1000):
+                continue
+
+            # accept this packet and update last seen seq
+            self.last_seq_received = seq_num
+            self.last_recv_timestamp_ms = timestamp_ms
 
             if msg_type == MSG_ACK:
                 # server acknowledged our INIT or ACK

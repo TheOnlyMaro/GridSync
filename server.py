@@ -4,7 +4,7 @@ import time
 import threading
 from util import pack_header, pack_actions_payload, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from game import GridGame
-from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT
+from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT, PACKET_LIFETIME
 
 SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
 
@@ -29,6 +29,10 @@ def handle_client(sock):
                 continue
 
             msg_type = data[5]
+            # parse seq and timestamp for validation
+            seq_num = struct.unpack("!I", data[10:14])[0]
+            timestamp_ms = struct.unpack("!Q", data[14:22])[0]
+
             if addr not in clients:
                 # Only register new client on explicit INIT message
                 if msg_type != MSG_INIT:
@@ -38,7 +42,8 @@ def handle_client(sock):
                 next_player_id += 1
                 clients[addr] = {
                     'player_id': player_id,
-                    'seq_num': 0,
+                    'seq_num': 1,
+                    'last_recv_seq': 0,
                     'last_seen': time.time(),
                     'last_heartbeat_ack': time.time(),
                     'state': 'active'
@@ -46,11 +51,25 @@ def handle_client(sock):
                 print(f"[SERVER] INIT from {addr} → Player {player_id}")
                 header = pack_header(MSG_ACK, 0, clients[addr]['seq_num'], 0)
                 sock.sendto(header, addr)
+                # increment per-client seq after send
+                clients[addr]['seq_num'] += 1
                 continue
             else:
                 # Update existing client
                 client_data = clients[addr]
                 player_id = client_data['player_id']
+                # validate incoming seq / timestamp
+                # drop duplicate or older seqs
+                if seq_num <= client_data.get('last_recv_seq', 0):
+                    continue
+
+                # drop stale packets
+                now_ms = int(time.time() * 1000)
+                if now_ms - timestamp_ms > int(PACKET_LIFETIME * 1000):
+                    continue
+
+                # accept and update last recv seq
+                client_data['last_recv_seq'] = seq_num
                 # If client is inactive and sends anything, deliver full actions snapshot (do not re-activate)
                 if client_data.get('state') == 'inactive':
                     print(f"[SERVER] Inactive client {player_id} sent data — sending full actions snapshot")
@@ -58,6 +77,7 @@ def handle_client(sock):
                     header = pack_header(MSG_SNAPSHOT, snapshot_id, client_data['seq_num'], len(full_payload))
                     try:
                         sock.sendto(header + full_payload, addr)
+                        client_data['seq_num'] += 1
                     except Exception:
                         pass
                     # Do not update state or last_seen here; only ACK will reactivate
@@ -100,6 +120,7 @@ def heartbeat(sock, interval=HEARTBEAT_INTERVAL, timeout=HEARTBEAT_TIMEOUT):
                 header = pack_header(MSG_HEARTBEAT, 0, cdata['seq_num'], 0)
                 try:
                     sock.sendto(header, addr)
+                    cdata['seq_num'] += 1
                 except Exception:
                     pass
                 # If last heartbeat ack is too old, mark inactive
