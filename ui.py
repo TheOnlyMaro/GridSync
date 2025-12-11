@@ -47,7 +47,7 @@ class GameUI:
         self.updating = False
 
     def on_connect(self):
-        if self.client is not None:
+        if self.client is not None and self.client.state == 'connected':
             messagebox.showinfo('Info', 'Already connected')
             return
         try:

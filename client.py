@@ -172,37 +172,27 @@ class Client:
                 self.packets_received += 1
 
             # measure ping for two cases:
-            # 1) server echoes back a client seq (legacy behavior)
-            # 2) server ACKs a heartbeat by returning the same heartbeat_id
+            # server ACKs a heartbeat by returning the same heartbeat_id
             now_ms = int(time.time() * 1000)
-            # Case 1: echoed seq (existing mechanism)
-            with self.sent_packets_lock:
-                if seq_num in self.sent_packets:
-                    sent_time = self.sent_packets.pop(seq_num)
-                    ping = now_ms - sent_time
-                    self.ping_samples.append(ping)
-                    if len(self.ping_samples) > 10:
-                        self.ping_samples.pop(0)
-                    self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
-                    logger.info(f'ping (seq echo): {ping}ms (avg: {self.ping_ms:.1f}ms)')
 
-            # Case 2: heartbeat ack (snapshot_id field contains heartbeat_id)
-            hb_id = snapshot_id
-            with self.pending_heartbeats_lock:
-                if hb_id in self.pending_heartbeats:
-                    sent_time = self.pending_heartbeats.pop(hb_id)
-                    ping = now_ms - sent_time
-                    self.ping_samples.append(ping)
-                    if len(self.ping_samples) > 10:
-                        self.ping_samples.pop(0)
-                    self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
-                    logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
+            # heartbeat ack (snapshot_id field contains heartbeat_id)
+            
 
             if msg_type == MSG_ACK:
                 # server acknowledged our INIT or ACK or heartbeat
                 self.state = 'connected'
                 self.last_heartbeat_ack = time.time()
                 logger.info(f'ACK received seq={seq_num} snapshot(heartbeat_id)={snapshot_id}')
+                hb_id = snapshot_id
+                with self.pending_heartbeats_lock:
+                     if hb_id in self.pending_heartbeats:
+                        sent_time = self.pending_heartbeats.pop(hb_id)
+                        ping = now_ms - sent_time
+                        self.ping_samples.append(ping)
+                        if len(self.ping_samples) > 10:
+                            self.ping_samples.pop(0)
+                        self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
+                        logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
 
             elif msg_type == MSG_SNAPSHOT:
                 # drop redundant snapshots (same or older snapshot_id)
