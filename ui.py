@@ -149,8 +149,8 @@ class GameUI:
         self.root.after(1000, self.update_stats_loop)
 
     def update_game_loop(self):
-        if not self.updating:
-            return
+        #if not self.updating:
+            #return
         # update grid from client data — only redraw cells when a new snapshot arrived
         if self.client and self.prev_grid is not None:
             last_ts = getattr(self.client, 'last_grid_update', 0.0)
