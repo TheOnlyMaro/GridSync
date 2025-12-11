@@ -43,6 +43,11 @@ class Client:
         # rolling ping stats (ms)
         self.ping_ms = 0.0
         self.ping_samples = []  # keep last 10 samples
+        # heartbeat id counter and pending heartbeats (heartbeat_id -> timestamp_ms)
+        self.heartbeat_id = 0
+        self.heartbeat_lock = threading.Lock()
+        self.pending_heartbeats = {}
+        self.pending_heartbeats_lock = threading.Lock()
         # packet loss tracking: expect next seq from server
         self.expected_next_recv_seq = 1
         self.packets_lost = 0  # count of lost packets
@@ -166,23 +171,38 @@ class Client:
                 self.expected_next_recv_seq = seq_num + 1
                 self.packets_received += 1
 
-            # measure ping for ACKs
-            if msg_type == MSG_ACK:
-                with self.sent_packets_lock:
-                    if seq_num in self.sent_packets:
-                        sent_time = self.sent_packets.pop(seq_num)
-                        ping = int(time.time() * 1000) - sent_time
-                        self.ping_samples.append(ping)
-                        if len(self.ping_samples) > 10:
-                            self.ping_samples.pop(0)
-                        self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
-                        logger.info(f'ping: {ping}ms (avg: {self.ping_ms:.1f}ms)')
+            # measure ping for two cases:
+            # 1) server echoes back a client seq (legacy behavior)
+            # 2) server ACKs a heartbeat by returning the same heartbeat_id
+            now_ms = int(time.time() * 1000)
+            # Case 1: echoed seq (existing mechanism)
+            with self.sent_packets_lock:
+                if seq_num in self.sent_packets:
+                    sent_time = self.sent_packets.pop(seq_num)
+                    ping = now_ms - sent_time
+                    self.ping_samples.append(ping)
+                    if len(self.ping_samples) > 10:
+                        self.ping_samples.pop(0)
+                    self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
+                    logger.info(f'ping (seq echo): {ping}ms (avg: {self.ping_ms:.1f}ms)')
+
+            # Case 2: heartbeat ack (snapshot_id field contains heartbeat_id)
+            hb_id = snapshot_id
+            with self.pending_heartbeats_lock:
+                if hb_id in self.pending_heartbeats:
+                    sent_time = self.pending_heartbeats.pop(hb_id)
+                    ping = now_ms - sent_time
+                    self.ping_samples.append(ping)
+                    if len(self.ping_samples) > 10:
+                        self.ping_samples.pop(0)
+                    self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
+                    logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
 
             if msg_type == MSG_ACK:
-                # server acknowledged our INIT or ACK
+                # server acknowledged our INIT or ACK or heartbeat
                 self.state = 'connected'
                 self.last_heartbeat_ack = time.time()
-                logger.info(f'ACK received seq={seq_num}')
+                logger.info(f'ACK received seq={seq_num} snapshot(heartbeat_id)={snapshot_id}')
 
             elif msg_type == MSG_SNAPSHOT:
                 # drop redundant snapshots (same or older snapshot_id)
@@ -230,7 +250,15 @@ class Client:
                 with self.seq_lock:
                     s = self.seq
                     self.seq += 1
-                hb = pack_header(MSG_HEARTBEAT, 0, s, 0)
+                # create a heartbeat id and send it in the snapshot_id field
+                with self.heartbeat_lock:
+                    self.heartbeat_id += 1
+                    hb_id = self.heartbeat_id
+                hb = pack_header(MSG_HEARTBEAT, hb_id, s, 0)
+                # record pending heartbeat timestamp for ping measurement
+                now_ms = int(time.time() * 1000)
+                with self.pending_heartbeats_lock:
+                    self.pending_heartbeats[hb_id] = now_ms
                 self._send(hb)
                 # check timeout
                 if now - self.last_heartbeat_ack > self.heartbeat_timeout:
