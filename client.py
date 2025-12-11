@@ -245,9 +245,15 @@ class Client:
             self.state = 'connected'
             self.send_ack()
         
-        if self.state != 'connected':
+        # Client timed out
+        if self.state == 'disconnected':
             self.send_init()
             return
+
+        # Client connecting - awaits full snapshot
+        if self.state != 'connecting':
+            return
+        
 
         # drop redundant snapshots unless full snapshot (MAXFOURBYTE)
         if snapshot_id <= self.last_snapshot_id and snapshot_id != MAXFOURBYTE:
