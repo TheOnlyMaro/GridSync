@@ -72,8 +72,10 @@ class GameUI:
 
         # Create top-left stats display (ping & packet loss)
         self.stats_text = tk.StringVar(value='Ping: -- | Loss: --%')
-        self.stats_label = tk.Label(self.grid_frame, textvariable=self.stats_text, fg='white', bg='black', font=('mono', 9), justify='left')
-        self.stats_label.place(x=5, y=5)
+        self.stats_label = tk.Label(self.top_frame, textvariable=self.stats_text, fg='white', bg='black', font=('mono', 9), justify='left')
+        #self.stats_label.place(x=5, y=5)
+        self.stats_label.pack(pady=(12,0))
+
 
         self.canvas = tk.Canvas(self.grid_frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg='white')
         self.canvas.pack()
