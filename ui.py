@@ -62,7 +62,8 @@ class GameUI:
         self.connect_btn.config(state='disabled')
         self.build_grid()
         self.updating = True
-        self.root.after(100, self.update_loop)
+        # update UI every second to display ping and loss consistently
+        self.root.after(1000, self.update_loop)
 
     def build_grid(self):
         if self.grid_frame:
@@ -74,7 +75,7 @@ class GameUI:
         self.stats_text = tk.StringVar(value='Ping: -- | Loss: --%')
         self.stats_label = tk.Label(self.top_frame, textvariable=self.stats_text, fg='white', bg='black', font=('mono', 9), justify='left')
         #self.stats_label.place(x=5, y=5)
-        self.stats_label.pack(pady=(12,0))
+        self.state_label.pack(pady=(12,0))
 
 
         self.canvas = tk.Canvas(self.grid_frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg='white')
@@ -141,7 +142,8 @@ class GameUI:
                     rect = self.rects[r][c]
                     self.canvas.itemconfig(rect, fill=color)
 
-        self.root.after(100, self.update_loop)
+        # schedule next update in 1 second
+        self.root.after(1000, self.update_loop)
 
 
 if __name__ == '__main__':

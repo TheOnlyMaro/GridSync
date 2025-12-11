@@ -179,20 +179,32 @@ class Client:
             
 
             if msg_type == MSG_ACK:
-                # server acknowledged our INIT or ACK or heartbeat
-                self.state = 'connected'
-                self.last_heartbeat_ack = time.time()
-                logger.info(f'ACK received seq={seq_num} snapshot(heartbeat_id)={snapshot_id}')
+                # ACK received — could be ACK for INIT or for a heartbeat
                 hb_id = snapshot_id
-                with self.pending_heartbeats_lock:
-                     if hb_id in self.pending_heartbeats:
-                        sent_time = self.pending_heartbeats.pop(hb_id)
-                        ping = now_ms - sent_time
-                        self.ping_samples.append(ping)
-                        if len(self.ping_samples) > 10:
-                            self.ping_samples.pop(0)
-                        self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
-                        logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
+                handled_hb = False
+                if hb_id != 0:
+                    # check if this ACK corresponds to a pending heartbeat
+                    with self.pending_heartbeats_lock:
+                        if hb_id in self.pending_heartbeats:
+                            sent_time = self.pending_heartbeats.pop(hb_id)
+                            ping = now_ms - sent_time
+                            self.ping_samples.append(ping)
+                            if len(self.ping_samples) > 10:
+                                self.ping_samples.pop(0)
+                            self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
+                            logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
+                            # Mark heartbeat ack time
+                            self.last_heartbeat_ack = time.time()
+                            handled_hb = True
+
+                if not handled_hb:
+                    # treat as a generic ACK (e.g., INIT ack) — consider connection established
+                    prior_state = self.state
+                    self.state = 'connected'
+                    # Only update last_heartbeat_ack for non-heartbeat ACKs if we were connecting or disconnected
+                    if prior_state in ('connecting', 'disconnected'):
+                        self.last_heartbeat_ack = time.time()
+                    logger.info(f'ACK received seq={seq_num} snapshot(heartbeat_id)={snapshot_id}')
 
             elif msg_type == MSG_SNAPSHOT:
                 # drop redundant snapshots (same or older snapshot_id)

@@ -29,7 +29,8 @@ def handle_client(sock):
                 continue
 
             msg_type = data[5]
-            # parse seq and timestamp for validation
+            # parse snapshot_id, seq and timestamp for validation
+            snapshot_id = struct.unpack("!I", data[6:10])[0]
             seq_num = struct.unpack("!I", data[10:14])[0]
             timestamp_ms = struct.unpack("!Q", data[14:22])[0]
 
