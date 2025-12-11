@@ -137,118 +137,49 @@ class Client:
                 break
 
             self.last_recv_time = time.time()
+            # validate header
             if len(data) < 28:
                 continue
             ok, reason = check_auth(data[:28])
             if not ok:
                 logger.warning(f'packet rejected: {reason}')
                 continue
+
+            # parse header fields
             msg_type = data[5]
             snapshot_id = struct.unpack("!I", data[6:10])[0]
             seq_num = struct.unpack("!I", data[10:14])[0]
             timestamp_ms = struct.unpack("!Q", data[14:22])[0]
 
-            # drop old/duplicate seqs
+            # common validation: drop old/duplicate or stale packets
             if seq_num <= self.last_seq_received:
                 logger.info(f'dropping packet seq={seq_num} <= last_seq={self.last_seq_received}')
                 continue
-
-            # drop stale packets
             now_ms = int(time.time() * 1000)
             if now_ms - timestamp_ms > int(PACKET_LIFETIME * 1000):
                 logger.info(f'dropping packet seq={seq_num} stale by {now_ms - timestamp_ms}ms')
                 continue
 
-            # accept this packet and update last seen seq
+            # accept this packet
             self.last_seq_received = seq_num
             self.last_recv_timestamp_ms = timestamp_ms
 
-            # ===== PING & LOSS TRACKING =====
-            # detect packet loss by checking for gaps in seq_num
+            # update loss tracking
             with self.recv_stats_lock:
                 if seq_num > self.expected_next_recv_seq:
-                    # gap detected: count missing packets as lost
                     gap = seq_num - self.expected_next_recv_seq
                     self.packets_lost += gap
                     logger.info(f'packet loss detected: gap of {gap} (expected {self.expected_next_recv_seq}, got {seq_num})')
                 self.expected_next_recv_seq = seq_num + 1
                 self.packets_received += 1
 
-            # measure ping for two cases:
-            # server ACKs a heartbeat by returning the same heartbeat_id
-            now_ms = int(time.time() * 1000)
-
-            # heartbeat ack (snapshot_id field contains heartbeat_id)
-            
-
+            # dispatch by message type
             if msg_type == MSG_ACK:
-                # ACK received — could be ACK for INIT or for a heartbeat
-                hb_id = snapshot_id
-                handled_hb = False
-                if hb_id != 0:
-                    # check if this ACK corresponds to a pending heartbeat
-                    with self.pending_heartbeats_lock:
-                        if hb_id in self.pending_heartbeats:
-                            sent_time = self.pending_heartbeats.pop(hb_id)
-                            ping = now_ms - sent_time
-                            self.ping_samples.append(ping)
-                            if len(self.ping_samples) > 10:
-                                self.ping_samples.pop(0)
-                            self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
-                            logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
-                            # Mark heartbeat ack time
-                            self.last_heartbeat_ack = time.time()
-                            handled_hb = True
-
-                if not handled_hb:
-                    # treat as a generic ACK (e.g., INIT ack) — consider connection established
-                    prior_state = self.state
-                    self.state = 'connected'
-                    # Only update last_heartbeat_ack for non-heartbeat ACKs if we were connecting or disconnected
-                    if prior_state in ('connecting', 'disconnected'):
-                        self.last_heartbeat_ack = time.time()
-                    logger.info(f'ACK received seq={seq_num} snapshot(heartbeat_id)={snapshot_id}')
-
+                self._handle_ack(snapshot_id)
             elif msg_type == MSG_SNAPSHOT:
-                # drop redundant snapshots (same or older snapshot_id)
-                if snapshot_id <= self.last_snapshot_id:
-                    logger.info(f'dropping SNAPSHOT id={snapshot_id} <= last_id={self.last_snapshot_id}')
-                    continue
-
-                # update last snapshot_id
-                self.last_snapshot_id = snapshot_id
-
-                # parse payload: starts at offset 28
-                payload_len = struct.unpack("!H", data[22:24])[0]
-                payload = data[28:28+payload_len] if payload_len > 0 else b''
-                if payload:
-                    try:
-                        count = struct.unpack("!H", payload[:2])[0]
-                        offset = 2
-                        for i in range(count):
-                            if offset + 6 > len(payload):
-                                break
-                            row, col, player_id = struct.unpack("!H H H", payload[offset:offset+6])
-                            offset += 6
-                            if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
-                                self.grid[row][col] = player_id
-                    except Exception:
-                        pass
-
-                # mark when we last applied a grid snapshot so UI can redraw promptly
-                self.last_grid_update = time.time()
-
-                logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
-
-                # if we are not currently connected, send ACK to request re-activation
-                if self.state != 'connected':
-                    self.send_ack()
-
+                self._handle_snapshot(data, snapshot_id, seq_num)
             elif msg_type == MSG_HEARTBEAT:
-                # reply with ACK
-                self.last_heartbeat_ack = time.time()
-                logger.info(f'HEARTBEAT received seq={seq_num} — sending ACK')
-                self.send_ack()
+                self._handle_incoming_heartbeat(seq_num)
 
     def _heartbeat_loop(self):
         while self.running:
@@ -275,6 +206,70 @@ class Client:
                 # attempt to connect
                 self.send_init()
             time.sleep(self.heartbeat_interval)
+
+    # ----- helper handlers extracted from _listen_loop -----
+    def _handle_ack(self, snapshot_id):
+        """Handle an incoming ACK packet. If snapshot_id matches a pending
+        heartbeat id, compute ping and update last_heartbeat_ack. Otherwise
+        treat it as a generic ACK (e.g. INIT ack)."""
+        now_ms = int(time.time() * 1000)
+        hb_id = snapshot_id
+        handled_hb = False
+        if hb_id != 0:
+            with self.pending_heartbeats_lock:
+                if hb_id in self.pending_heartbeats:
+                    sent_time = self.pending_heartbeats.pop(hb_id)
+                    ping = now_ms - sent_time
+                    self.ping_samples.append(ping)
+                    if len(self.ping_samples) > 10:
+                        self.ping_samples.pop(0)
+                    self.ping_ms = sum(self.ping_samples) / len(self.ping_samples)
+                    logger.info(f'ping (heartbeat): {ping}ms (avg: {self.ping_ms:.1f}ms)')
+                    self.last_heartbeat_ack = time.time()
+                    handled_hb = True
+
+        if not handled_hb:
+            prior_state = self.state
+            self.state = 'connected'
+            if prior_state in ('connecting', 'disconnected'):
+                self.last_heartbeat_ack = time.time()
+            logger.info(f'ACK received (generic) snapshot(heartbeat_id)={snapshot_id}')
+
+    def _handle_snapshot(self, data, snapshot_id, seq_num):
+        """Apply an incoming SNAPSHOT payload to the local grid."""
+        # drop redundant snapshots
+        if snapshot_id <= self.last_snapshot_id:
+            logger.info(f'dropping SNAPSHOT id={snapshot_id} <= last_id={self.last_snapshot_id}')
+            return
+        self.last_snapshot_id = snapshot_id
+        payload_len = struct.unpack("!H", data[22:24])[0]
+        payload = data[28:28+payload_len] if payload_len > 0 else b''
+        count = 0
+        if payload:
+            try:
+                count = struct.unpack("!H", payload[:2])[0]
+                offset = 2
+                for i in range(count):
+                    if offset + 6 > len(payload):
+                        break
+                    row, col, player_id = struct.unpack("!H H H", payload[offset:offset+6])
+                    offset += 6
+                    if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
+                        self.grid[row][col] = player_id
+            except Exception:
+                pass
+
+        # mark when we last applied a grid snapshot so UI can redraw promptly
+        self.last_grid_update = time.time()
+        logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
+        if self.state != 'connected':
+            self.send_ack()
+
+    def _handle_incoming_heartbeat(self, seq_num):
+        # update last heartbeat ack/time and reply
+        self.last_heartbeat_ack = time.time()
+        logger.info(f'HEARTBEAT received seq={seq_num} — sending ACK')
+        self.send_ack()
 
 
 if __name__ == '__main__':
