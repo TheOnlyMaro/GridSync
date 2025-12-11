@@ -49,7 +49,8 @@ def handle_client(sock):
                     'seq_num': 1,
                     'last_recv_seq': 0,
                     'last_seen': time.time(),
-                    'last_heartbeat_ack': time.time(),
+                    # track when we last received a heartbeat from this client
+                    'last_heartbeat_recv': time.time(),
                     'state': 'active'
                 }
                 print(f"[SERVER] INIT from {addr} → Player {player_id}")
@@ -101,14 +102,22 @@ def handle_client(sock):
                     else:
                         print(f"[SERVER] Invalid cell ({row},{col}) from Player {player_id}")
                 elif msg_type == MSG_ACK:
-                    # ACK can be used to acknowledge heartbeats/snapshots - reactivate client if it was inactive
-                    client_data['last_heartbeat_ack'] = time.time()
+                    # ACK from client (rare) - update last_seen as a soft touch
+                    client_data['last_seen'] = time.time()
                     if client_data.get('state') == 'inactive':
                         client_data['state'] = 'active'
                         print(f"[SERVER] Received ACK from Player {player_id} → re-activated")
                 elif msg_type == MSG_HEARTBEAT:
-                    # If client explicitly replies with heartbeat message type, treat similarly to ACK
-                    client_data['last_heartbeat_ack'] = time.time()
+                    # Client sent heartbeat (unidirectional): update last heartbeat receive time
+                    client_data['last_heartbeat_recv'] = time.time()
+                    # Reply with ACK that contains same heartbeat id in snapshot_id field
+                    hb_id = snapshot_id
+                    header = pack_header(MSG_ACK, hb_id, client_data['seq_num'], 0)
+                    try:
+                        sock.sendto(header, addr)
+                        client_data['seq_num'] += 1
+                    except Exception:
+                        pass
                 # else: ignore or handle other message types as needed
 
         except socket.timeout:
@@ -121,19 +130,11 @@ def heartbeat(sock, interval=HEARTBEAT_INTERVAL, timeout=HEARTBEAT_TIMEOUT):
     while running:
         now = time.time()
         for addr, cdata in list(clients.items()):
-            # Send heartbeat only to clients currently marked active
-            if cdata.get('state') == 'active':
-                header = pack_header(MSG_HEARTBEAT, 0, cdata['seq_num'], 0)
-                try:
-                    sock.sendto(header, addr)
-                    cdata['seq_num'] += 1
-                except Exception:
-                    pass
-                # If last heartbeat ack is too old, mark inactive
-                last_ack = cdata.get('last_heartbeat_ack', 0)
-                if now - last_ack > timeout:
-                    cdata['state'] = 'inactive'
-                    print(f"[SERVER] Client Player {cdata['player_id']} marked INACTIVE (no heartbeat ACK in {timeout}s)")
+            # Monitor last received heartbeat time and mark clients inactive
+            last_recv = cdata.get('last_heartbeat_recv', 0)
+            if now - last_recv > timeout and cdata.get('state') == 'active':
+                cdata['state'] = 'inactive'
+                print(f"[SERVER] Client Player {cdata['player_id']} marked INACTIVE (no heartbeat received in {timeout}s)")
         time.sleep(interval)
 
 
