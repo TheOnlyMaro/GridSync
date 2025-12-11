@@ -29,8 +29,8 @@ def handle_client(sock):
                 continue
 
             msg_type = data[5]
-            # parse snapshot_id, seq and timestamp for validation
-            snapshot_id = struct.unpack("!I", data[6:10])[0]
+            # parse heartbeat_id, seq and timestamp for validation
+            heartbeat_id = struct.unpack("!I", data[6:10])[0]
             seq_num = struct.unpack("!I", data[10:14])[0]
             timestamp_ms = struct.unpack("!Q", data[14:22])[0]
 
@@ -112,8 +112,7 @@ def handle_client(sock):
                     # Client sent heartbeat (unidirectional): update last heartbeat receive time
                     client_data['last_heartbeat_recv'] = time.time()
                     # Reply with ACK that contains same heartbeat id in snapshot_id field
-                    hb_id = snapshot_id
-                    header = pack_header(MSG_ACK, hb_id, client_data['seq_num'], 0)
+                    header = pack_header(MSG_ACK, heartbeat_id, client_data['seq_num'], 0)
                     try:
                         sock.sendto(header, addr)
                         client_data['seq_num'] += 1
