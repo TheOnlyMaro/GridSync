@@ -32,6 +32,7 @@ def _register_client(addr):
         'last_heartbeat_recv': time.time(),
         'state': 'pending'  # pending → active after ACK
     }
+    print(f"[SERVER] Registered new client {addr} as Player {player_id}, pending ack")
     return clients[addr], player_id
 
 
@@ -77,6 +78,8 @@ def _process_existing_client_packet(sock, addr, data, msg_type, heartbeat_id, se
     if client_data.get('state') == 'inactive':
         print(f"[SERVER] Inactive client {player_id} sent data — sending full actions snapshot")
         _send_full_snapshot_to_client(sock, addr, client_data)
+        client_data['last_seen'] = time.time()
+        client_data['state'] = 'pending'  # remain inactive
         return
 
     # For active clients, update last_seen
@@ -166,6 +169,11 @@ def broadcast_snapshots(sock):
             if(clients[addr].get('state') == 'inactive'):
                 inactiveClients += 1
                 continue  # Skip inactive clients
+            
+            elif(clients[addr].get('state') == 'pending'):
+                _send_full_snapshot_to_client(sock, addr, clients[addr])
+                continue  # Skip pending clients until they ACK
+
             header = pack_header(MSG_SNAPSHOT, snapshot_id, clients[addr]['seq_num'], len(payload))
             sock.sendto(header + payload, addr)
             clients[addr]['seq_num'] += 1
