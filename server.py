@@ -8,6 +8,8 @@ from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTE
 
 SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
 
+MAXFOURBYTE = B'11111111111111111111111111111111'
+
 # Client dictionary: addr -> {player_id, seq_num, last_seen, state}
 clients = {}
 snapshot_id = 0
@@ -28,7 +30,7 @@ def _register_client(addr):
         'last_recv_seq': 0,
         'last_seen': time.time(),
         'last_heartbeat_recv': time.time(),
-        'state': 'active'
+        'state': 'inactive'  # start as inactive until first ack
     }
     return clients[addr], player_id
 
@@ -38,8 +40,7 @@ def _send_full_snapshot_to_client(sock, addr, client_data):
     global snapshot_id
     try:
         full_payload = pack_actions_payload(game.actions)
-        snapshot_id += 1
-        header = pack_header(MSG_SNAPSHOT, snapshot_id, client_data['seq_num'], len(full_payload))
+        header = pack_header(MSG_SNAPSHOT, MAXFOURBYTE, MAXFOURBYTE, len(full_payload))
         sock.sendto(header + full_payload, addr)
         client_data['seq_num'] += 1
         print(f"[SERVER] Sent FULL SNAPSHOT #{snapshot_id} to Player {client_data['player_id']} (actions: {len(game.actions)})")
@@ -76,21 +77,11 @@ def _process_existing_client_packet(sock, addr, data, msg_type, heartbeat_id, se
     if msg_type == MSG_ACTION:
         _handle_action_message(player_id, data)
     elif msg_type == MSG_ACK:
-        # ACK from client (rare) - update last_seen as a soft touch and reactivate
+        # ACK from client if first full snapshot - update last_seen and activate
         client_data['last_seen'] = time.time()
         if client_data.get('state') == 'inactive':
             client_data['state'] = 'active'
-            print(f"[SERVER] Received ACK from Player {player_id} → re-activated")
-    elif msg_type == MSG_HEARTBEAT:
-        # Client sent heartbeat (unidirectional): update last heartbeat receive time
-        client_data['last_heartbeat_recv'] = time.time()
-        # Reply with ACK that contains same heartbeat id in snapshot_id field
-        header = pack_header(MSG_ACK, heartbeat_id, client_data['seq_num'], 0)
-        try:
-            sock.sendto(header, addr)
-            client_data['seq_num'] += 1
-        except Exception:
-            pass
+            print(f"[SERVER] Received ACK from Player {player_id} → activated")
 
 
 def _handle_action_message(player_id, data):
@@ -149,19 +140,6 @@ def handle_client(sock):
         except Exception:
             break
 
-# New heartbeat thread: sends heartbeat to active clients and marks inactive if no ACK in timeout seconds
-def heartbeat(sock, interval=HEARTBEAT_INTERVAL, timeout=HEARTBEAT_TIMEOUT):
-    while running:
-        now = time.time()
-        for addr, cdata in list(clients.items()):
-            # Monitor last received heartbeat time and mark clients inactive
-            last_recv = cdata.get('last_heartbeat_recv', 0)
-            if now - last_recv > timeout and cdata.get('state') == 'active':
-                cdata['state'] = 'inactive'
-                print(f"[SERVER] Client Player {cdata['player_id']} marked INACTIVE (no heartbeat received in {timeout}s)")
-        time.sleep(interval)
-
-
 def broadcast_snapshots(sock):
     global snapshot_id
     last_payload = None
@@ -199,7 +177,6 @@ def main():
 
     print(f"[SERVER] Listening on {SERVER_ADDR[0]}:{SERVER_ADDR[1]}")
     threading.Thread(target=broadcast_snapshots, args=(sock,), daemon=True).start()
-    threading.Thread(target=heartbeat, args=(sock,), daemon=True).start()
 
     start_time = time.time()
     try:

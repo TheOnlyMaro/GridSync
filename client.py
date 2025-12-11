@@ -6,6 +6,9 @@ from util import pack_header, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_H
 from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE, PACKET_LIFETIME
 import logging
 
+MAXFOURBYTE = B'11111111111111111111111111111111'
+
+
 # configure client console logging so UI runs print client logs to the terminal
 logging.basicConfig(level=logging.INFO, format='[CLIENT] %(message)s')
 logger = logging.getLogger('gsyn.client')
@@ -178,8 +181,7 @@ class Client:
                 self._handle_ack(snapshot_id)
             elif msg_type == MSG_SNAPSHOT:
                 self._handle_snapshot(data, snapshot_id, seq_num)
-            elif msg_type == MSG_HEARTBEAT:
-                self._handle_incoming_heartbeat(seq_num)
+
 
     def _heartbeat_loop(self):
         while self.running:
@@ -230,18 +232,29 @@ class Client:
 
         if not handled_hb:
             prior_state = self.state
-            self.state = 'connected'
+            self.state = 'fetching data'
             if prior_state in ('connecting', 'disconnected'):
                 self.last_heartbeat_ack = time.time()
             logger.info(f'ACK received (generic) snapshot(heartbeat_id)={snapshot_id}')
 
     def _handle_snapshot(self, data, snapshot_id, seq_num):
         """Apply an incoming SNAPSHOT payload to the local grid."""
-        # drop redundant snapshots
-        if snapshot_id <= self.last_snapshot_id:
+            
+        if snapshot_id == MAXFOURBYTE:
+            logger.info(f'FULL SNAPSHOT received id={snapshot_id} seq={seq_num}')
+            self.state = 'connected'
+            self.send_ack()
+        
+        if self.state != 'connected':
+            self.send_init()
+            return
+
+        # drop redundant snapshots unless full snapshot (MAXFOURBYTE)
+        if snapshot_id <= self.last_snapshot_id and snapshot_id != MAXFOURBYTE:
             logger.info(f'dropping SNAPSHOT id={snapshot_id} <= last_id={self.last_snapshot_id}')
             return
-        self.last_snapshot_id = snapshot_id
+        # Track last snapshot id unless full snapshot
+        self.last_snapshot_id = snapshot_id if snapshot_id != MAXFOURBYTE else self.last_snapshot_id
         payload_len = struct.unpack("!H", data[22:24])[0]
         payload = data[28:28+payload_len] if payload_len > 0 else b''
         count = 0
@@ -262,14 +275,7 @@ class Client:
         # mark when we last applied a grid snapshot so UI can redraw promptly
         self.last_grid_update = time.time()
         logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
-        if self.state != 'connected':
-            self.send_ack()
-
-    def _handle_incoming_heartbeat(self, seq_num):
-        # update last heartbeat ack/time and reply
-        self.last_heartbeat_ack = time.time()
-        logger.info(f'HEARTBEAT received seq={seq_num} — sending ACK')
-        self.send_ack()
+        
 
 
 if __name__ == '__main__':
