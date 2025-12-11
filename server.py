@@ -4,8 +4,9 @@ import time
 import threading
 from util import pack_header, pack_actions_payload, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from game import GridGame
+from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT
 
-SERVER_ADDR = ("0.0.0.0", 9999)
+SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
 
 # Client dictionary: addr -> {player_id, seq_num, last_seen, state}
 clients = {}
@@ -14,7 +15,7 @@ running = True
 next_player_id = 1
 
 # Game logic
-game = GridGame(20, 20)
+game = GridGame(GRID_SIZE, GRID_SIZE)
 
 def handle_client(sock):
     global snapshot_id, next_player_id
@@ -89,8 +90,8 @@ def handle_client(sock):
         except Exception as e:
             break
 
-# New heartbeat thread: sends heartbeat to active clients and marks inactive if no ACK in 3s
-def heartbeat(sock, interval=0.05, timeout=3.0):
+# New heartbeat thread: sends heartbeat to active clients and marks inactive if no ACK in timeout seconds
+def heartbeat(sock, interval=HEARTBEAT_INTERVAL, timeout=HEARTBEAT_TIMEOUT):
     while running:
         now = time.time()
         for addr, cdata in list(clients.items()):
@@ -113,12 +114,12 @@ def broadcast_snapshots(sock):
     global snapshot_id
     last_payload = None
     while running:
-        time.sleep(0.05)
+        time.sleep(SNAPSHOT_BROADCAST_INTERVAL)
         if not clients:
             continue
         
-        # Get the last 20 actions via game logic
-        recent_actions = game.get_recent_actions(20)
+        # Get the last K actions via game logic
+        recent_actions = game.get_recent_actions(LAST_K_ACTIONS)
         # Pack payload using util helper
         payload = pack_actions_payload(recent_actions)
         
@@ -127,20 +128,22 @@ def broadcast_snapshots(sock):
             snapshot_id += 1
             last_payload = payload
         
+        inactiveClients = 0
         for addr in clients:
             if(clients[addr].get('state') == 'inactive'):
+                inactiveClients += 1
                 continue  # Skip inactive clients
             header = pack_header(MSG_SNAPSHOT, snapshot_id, clients[addr]['seq_num'], len(payload))
             sock.sendto(header + payload, addr)
             clients[addr]['seq_num'] += 1
         
-        print(f"[SERVER] Sent SNAPSHOT #{snapshot_id} to {len(clients)} clients (actions: {len(recent_actions)})")
+        print(f"[SERVER] Sent SNAPSHOT #{snapshot_id} to {len(clients) - inactiveClients} clients (actions: {len(recent_actions)})")
 
 def main():
     global running
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(SERVER_ADDR)
-    sock.settimeout(0.5)
+    sock.settimeout(SOCKET_TIMEOUT)
 
     print(f"[SERVER] Listening on {SERVER_ADDR[0]}:{SERVER_ADDR[1]}")
     threading.Thread(target=broadcast_snapshots, args=(sock,), daemon=True).start()
@@ -148,7 +151,7 @@ def main():
 
     start_time = time.time()
     try:
-        while time.time() - start_time < 20:  # run for 20 seconds
+        while time.time() - start_time < SERVER_RUN_DURATION:
             handle_client(sock)
     except KeyboardInterrupt:
         pass

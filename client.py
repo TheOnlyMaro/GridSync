@@ -3,12 +3,13 @@ import struct
 import threading
 import time
 from util import pack_header, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
+from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE
 
-SERVER_ADDR = ("154.176.72.86", 9999)
+SERVER_ADDR = (CLIENT_SERVER_HOST, CLIENT_SERVER_PORT)
 
 
 class Client:
-    def __init__(self, server_addr=SERVER_ADDR, heartbeat_interval=1.0, heartbeat_timeout=3.0):
+    def __init__(self, server_addr=SERVER_ADDR, heartbeat_interval=CLIENT_HEARTBEAT_INTERVAL, heartbeat_timeout=CLIENT_HEARTBEAT_TIMEOUT):
         self.server_addr = server_addr
         self.heartbeat_interval = heartbeat_interval
         self.heartbeat_timeout = heartbeat_timeout
@@ -25,8 +26,8 @@ class Client:
         self.last_heartbeat_ack = 0.0
         self.last_recv_time = 0.0
 
-        # 20x20 grid
-        self.grid = [[0 for _ in range(20)] for _ in range(20)]
+        # Grid (configurable size)
+        self.grid = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
 
         # action buffer (kept for completeness)
         self.actions = []
@@ -46,7 +47,7 @@ class Client:
         self.state = 'connecting'
 
     def send_action(self, row, col):
-        if not (0 <= row < 20 and 0 <= col < 20):
+        if not (0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE):
             return
         with self.seq_lock:
             s = self.seq
@@ -81,7 +82,7 @@ class Client:
     def _listen_loop(self):
         while self.running:
             try:
-                data, _ = self.sock.recvfrom(4096)
+                data, _ = self.sock.recvfrom(MAX_RECV_SIZE)
             except socket.timeout:
                 continue
             except Exception:
@@ -116,7 +117,7 @@ class Client:
                                 break
                             row, col, player_id = struct.unpack("!H H H", payload[offset:offset+6])
                             offset += 6
-                            if 0 <= row < 20 and 0 <= col < 20:
+                            if 0 <= row < GRID_SIZE and 0 <= col < GRID_SIZE:
                                 self.grid[row][col] = player_id
                     except Exception:
                         pass

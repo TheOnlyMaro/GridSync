@@ -4,6 +4,7 @@ import threading
 import time
 import os
 import importlib.util
+from config import GRID_SIZE
 
 # Load client module from NEW/client.py dynamically
 CLIENT_PATH = os.path.join(os.path.dirname(__file__), 'client.py')
@@ -12,7 +13,6 @@ client_mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(client_mod)
 
 CELL_SIZE = 25
-GRID_SIZE = 20
 CANVAS_SIZE = CELL_SIZE * GRID_SIZE
 
 COLOR_MAP = {
