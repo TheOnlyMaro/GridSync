@@ -36,6 +36,10 @@ class GameUI:
         self.connect_btn = tk.Button(self.top_frame, text='CONNECT TO SERVER', command=self.on_connect)
         self.connect_btn.pack()
 
+        # End game button (disabled until connected)
+        self.end_btn = tk.Button(self.top_frame, text='END GAME', command=self.end_game, state='disabled')
+        self.end_btn.pack(pady=(6,0))
+
         self.state_label = tk.Label(self.top_frame, text='State: not connected')
         self.state_label.pack(pady=(6,0))
 
@@ -64,6 +68,8 @@ class GameUI:
 
         # Replace top with grid
         self.connect_btn.config(state='disabled')
+        # enable end game button
+        self.end_btn.config(state='normal')
         self.build_grid()
         self.updating = True
         # start separated update loops: game updates (50ms) and stats (1s)
@@ -170,8 +176,87 @@ class GameUI:
                             prow[c] = owner
                 self._last_grid_ts = last_ts
 
+                # if the board is full (no zeros/empty cells), end the game automatically
+                full = True
+                for row in grid:
+                    for owner in row:
+                        if owner is None or owner == 0:
+                            full = False
+                            break
+                    if not full:
+                        break
+                if full:
+                    self.end_game()
+                    return
+
         # schedule next game update in 50 ms
         self.root.after(50, self.update_game_loop)
+
+    def end_game(self):
+        # stop update loops and prevent further actions
+        self.updating = False
+        try:
+            # try to stop client if it exposes a stop method
+            if self.client and hasattr(self.client, 'stop'):
+                self.client.stop()
+        except Exception:
+            pass
+
+        # disable canvas interactions
+        if self.canvas:
+            try:
+                self.canvas.unbind('<Button-1>')
+            except Exception:
+                pass
+
+        # disable end button to avoid repeated calls
+        try:
+            self.end_btn.config(state='disabled')
+        except Exception:
+            pass
+
+        # compute scores from current grid
+        scores = {}
+        grid = None
+        try:
+            grid = getattr(self.client, 'grid', None)
+        except Exception:
+            grid = None
+
+        if grid is None:
+            messagebox.showinfo('Game Over', 'No grid data available to compute scores.')
+            return
+
+        for r in grid:
+            for owner in r:
+                if owner is None:
+                    continue
+                if owner == 0:
+                    continue
+                scores[owner] = scores.get(owner, 0) + 1
+
+        # include players with zero cells (up to 4 based on COLOR_MAP)
+        for pid in range(1, max(COLOR_MAP.keys()) + 1):
+            scores.setdefault(pid, 0)
+
+        # sort players by score desc, tie-break by player id asc
+        ranked = sorted(scores.items(), key=lambda x: (-x[1], x[0]))
+
+        # build result string
+        lines = ['Game Over — Scores and Ranking:']
+        rank = 1
+        prev_score = None
+        for idx, (pid, sc) in enumerate(ranked):
+            # handle ties: same rank if equal score
+            if prev_score is None:
+                rank = 1
+            else:
+                if sc < prev_score:
+                    rank = idx + 1
+            prev_score = sc
+            lines.append(f'{rank}. Player {pid}: {sc} cells')
+
+        messagebox.showinfo('Game Over', '\n'.join(lines))
 
 
 if __name__ == '__main__':
