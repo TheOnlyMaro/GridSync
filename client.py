@@ -6,7 +6,7 @@ from util import pack_header, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_H
 from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE, PACKET_LIFETIME
 import logging
 
-MAXFOURBYTE = B'11111111111111111111111111111111'
+MAXFOURBYTE = 0xFFFFFFFF
 
 
 # configure client console logging so UI runs print client logs to the terminal
@@ -47,7 +47,7 @@ class Client:
         self.ping_ms = 0.0
         self.ping_samples = []  # keep last 10 samples
         # heartbeat id counter and pending heartbeats (heartbeat_id -> timestamp_ms)
-        self.heartbeat_id = 0
+        self.heartbeat_id = 1
         self.heartbeat_lock = threading.Lock()
         self.pending_heartbeats = {}
         self.pending_heartbeats_lock = threading.Lock()
@@ -184,9 +184,10 @@ class Client:
 
 
     def _heartbeat_loop(self):
+        self.last_heartbeat_ack = time.time()
         while self.running:
             now = time.time()
-            if self.state == 'connected':
+            if self.state != 'disconnected':
                 # send heartbeat
                 with self.seq_lock:
                     s = self.seq
@@ -202,7 +203,7 @@ class Client:
                     self.pending_heartbeats[hb_id] = now_ms
                 self._send(hb)
                 # check timeout
-                if now - self.last_heartbeat_ack > self.heartbeat_timeout:
+                if now - self.last_heartbeat_ack > self.heartbeat_timeout and self.heartbeat_id > 2:
                     self.state = 'disconnected'
                     logger.warning('heartbeat timeout — disconnected from server')
             elif self.state == 'disconnected':

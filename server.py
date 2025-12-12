@@ -8,7 +8,7 @@ from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, SNAPSHOT_BROAD
 
 SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
 
-MAXFOURBYTE = B'11111111111111111111111111111111'
+MAXFOURBYTE = 0xFFFFFFFF
 
 # Client dictionary: addr -> {player_id, seq_num, last_seen, state}
 clients = {}
@@ -41,10 +41,10 @@ def _send_full_snapshot_to_client(sock, addr, client_data):
     global snapshot_id
     try:
         full_payload = pack_actions_payload(game.actions)
-        header = pack_header(MSG_SNAPSHOT, MAXFOURBYTE, MAXFOURBYTE, len(full_payload))
+        header = pack_header(MSG_SNAPSHOT, MAXFOURBYTE, client_data['seq_num'], len(full_payload))
         sock.sendto(header + full_payload, addr)
         client_data['seq_num'] += 1
-        print(f"[SERVER] Sent FULL SNAPSHOT #{snapshot_id} to Player {client_data['player_id']} (actions: {len(game.actions)})")
+        print(f"[SERVER] Sent FULL SNAPSHOT #{MAXFOURBYTE} to Player {client_data['player_id']} (actions: {len(game.actions)})")
     except Exception:
         pass
 
@@ -72,6 +72,8 @@ def _process_existing_client_packet(sock, addr, data, msg_type, heartbeat_id, se
             client_data['state'] = 'active'
             client_data['last_seen'] = time.time()
             print(f"[SERVER] Received ACK from Player {player_id} → activated")
+        else:
+            _send_full_snapshot_to_client(sock, addr, client_data)
         return
 
     # If client is inactive and sends anything, deliver full actions snapshot (do not re-activate)
