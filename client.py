@@ -246,7 +246,7 @@ class Client:
             self.state = 'connecting'  # remain connecting until full snapshot
             logger.info(f'ACK received (for INIT) snapshot={snapshot_id}')
 
-    def _handle_snapshot(self, data, snapshot_id, seq_num):
+    def _handle_snapshot(self, data, snapshot_id, seq_num, timestamp_ms, now_ms):
         """Apply an incoming SNAPSHOT payload to the local grid."""
             
         if snapshot_id == MAXFOURBYTE:
