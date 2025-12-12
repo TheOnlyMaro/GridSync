@@ -66,10 +66,10 @@ Icon?
 *.sqlite3
 *.db
 
-# Generated and large files
-results/
-capture.pcap
-*.pcap
+# Generated and large files, temporarily commented out
+#results/
+#capture.pcap
+#*.pcap
 
 # Temporary files
 tmp/
