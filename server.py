@@ -2,6 +2,9 @@ import socket
 import struct
 import time
 import threading
+import csv
+import os
+import psutil
 from util import pack_header, pack_actions_payload, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from game import GridGame
 from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT, PACKET_LIFETIME, MAX_PLAYERS
@@ -18,6 +21,12 @@ next_player_id = 1
 
 # Game logic
 game = GridGame(GRID_SIZE, GRID_SIZE)
+
+# CSV metrics tracking
+csv_file = "server_metrics.csv"
+csv_initialized = False
+csv_lock = threading.Lock()
+
 
 def _register_client(addr):
     """Register a new client address and return the client_data dict and player_id."""
@@ -38,7 +47,6 @@ def _register_client(addr):
 
 def _send_full_snapshot_to_client(sock, addr, client_data):
     """Send a full-action snapshot to the given client address."""
-    global snapshot_id
     try:
         full_payload = pack_actions_payload(game.actions)
         header = pack_header(MSG_SNAPSHOT, MAXFOURBYTE, client_data['seq_num'], len(full_payload))
@@ -160,6 +168,37 @@ def handle_client(sock):
         except Exception:
             break
 
+
+
+def _log_server_metrics_to_csv(snapshot_id, active_clients, total_actions):
+    """Log server metrics to CSV file."""
+    global csv_file, csv_initialized, csv_lock
+
+    with csv_lock:
+        if not csv_initialized:
+            file_exists = os.path.exists(csv_file)
+            with open(csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow([
+                        'timestamp_ms', 'snapshot_id', 'active_clients',
+                        'total_actions', 'cpu_percent'
+                    ])
+                f.flush()  # ADD THIS LINE
+                os.fsync(f.fileno())  # ADD THIS LINE TOO
+            csv_initialized = True
+
+        timestamp_ms = int(time.time() * 1000)
+        cpu_percent = psutil.cpu_percent()
+
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                timestamp_ms, snapshot_id, active_clients,
+                total_actions, cpu_percent
+            ])
+
+
 def broadcast_snapshots(sock):
     global snapshot_id
     last_payload = None
@@ -193,6 +232,9 @@ def broadcast_snapshots(sock):
             clients[addr]['seq_num'] += 1
         
         print(f"[SERVER] Sent SNAPSHOT #{snapshot_id} to {len(clients) - inactiveClients} clients (actions: {len(recent_actions)})")
+
+          # Log metrics to CSV
+        _log_server_metrics_to_csv(snapshot_id, active_count, len(game.actions))
 
 def main():
     global running

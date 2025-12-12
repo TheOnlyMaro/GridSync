@@ -2,6 +2,8 @@ import socket
 import struct
 import threading
 import time
+import csv
+import os
 from util import pack_header, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from config import CLIENT_SERVER_HOST, CLIENT_SERVER_PORT, CLIENT_HEARTBEAT_INTERVAL, CLIENT_HEARTBEAT_TIMEOUT, GRID_SIZE, MAX_RECV_SIZE, PACKET_LIFETIME
 import logging
@@ -56,6 +58,14 @@ class Client:
         self.packets_lost = 0  # count of lost packets
         self.packets_received = 0  # count of received packets
         self.recv_stats_lock = threading.Lock()
+
+        # CSV metrics tracking
+        self.client_id = 1
+        self.csv_file = "client_metrics.csv"
+        self.csv_initialized = False
+        self.csv_lock = threading.Lock()
+        self.previous_latency_ms = None
+
 
         # Grid (configurable size)
         self.grid = [[0 for _ in range(GRID_SIZE)] for _ in range(GRID_SIZE)]
@@ -180,7 +190,7 @@ class Client:
             if msg_type == MSG_ACK:
                 self._handle_ack(snapshot_id)
             elif msg_type == MSG_SNAPSHOT:
-                self._handle_snapshot(data, snapshot_id, seq_num)
+                self._handle_snapshot(data, snapshot_id, seq_num, timestamp_ms, now_ms)
 
 
     def _heartbeat_loop(self):
@@ -261,7 +271,7 @@ class Client:
         # Track last snapshot id unless full snapshot
         self.last_snapshot_id = snapshot_id if snapshot_id != MAXFOURBYTE else self.last_snapshot_id
         payload_len = struct.unpack("!H", data[22:24])[0]
-        payload = data[28:28+payload_len] if payload_len > 0 else b''
+        payload = data[28:28 + payload_len] if payload_len > 0 else b''
         count = 0
         if payload:
             try:
@@ -280,7 +290,54 @@ class Client:
         # mark when we last applied a grid snapshot so UI can redraw promptly
         self.last_grid_update = time.time()
         logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
-        
+
+        # Log metrics to CSV
+        self._log_metrics_to_csv(snapshot_id, seq_num, timestamp_ms, now_ms)
+
+    def _log_metrics_to_csv(self, snapshot_id, seq_num, server_timestamp_ms, recv_time_ms):
+        """Log metrics to CSV file when a SNAPSHOT is received."""
+        with self.csv_lock:
+            if not self.csv_initialized:
+                file_exists = os.path.exists(self.csv_file)
+                with open(self.csv_file, 'a', newline='') as f:
+                    writer = csv.writer(f)
+                    if not file_exists:
+                        writer.writerow([
+                            'timestamp_ms', 'client_id', 'snapshot_id', 'seq_num',
+                            'server_timestamp_ms', 'recv_time_ms', 'latency_ms',
+                            'jitter_ms', 'packets_received', 'packets_lost',
+                            'loss_percentage', 'ping_ms'
+                        ])
+                    f.flush()  # ADD THIS LINE
+                    os.fsync(f.fileno())  # ADD THIS LINE TOO
+                self.csv_initialized = True
+
+            timestamp_ms = int(time.time() * 1000)
+            latency_ms = recv_time_ms - server_timestamp_ms
+
+            jitter_ms = 0.0
+            if self.previous_latency_ms is not None:
+                jitter_ms = abs(latency_ms - self.previous_latency_ms)
+            self.previous_latency_ms = latency_ms
+
+            with self.recv_stats_lock:
+                packets_received = self.packets_received
+                packets_lost = self.packets_lost
+                total_packets = packets_received + packets_lost
+                loss_percentage = (packets_lost / total_packets * 100.0) if total_packets > 0 else 0.0
+
+            ping_ms = self.ping_ms
+
+            with open(self.csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    timestamp_ms, self.client_id, snapshot_id, seq_num,
+                    server_timestamp_ms, recv_time_ms, latency_ms,
+                    jitter_ms, packets_received, packets_lost,
+                    loss_percentage, ping_ms
+                ])
+
+  
 
 
 if __name__ == '__main__':

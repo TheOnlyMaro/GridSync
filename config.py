@@ -6,7 +6,7 @@ Modify these variables to change behavior without editing client.py or server.py
 # ========== SERVER CONFIGURATION ==========
 SERVER_HOST = "0.0.0.0"
 SERVER_PORT = 9999
-SERVER_RUN_DURATION = 20  # seconds; set to float('inf') for indefinite runtime
+SERVER_RUN_DURATION = 120  # seconds; set to float('inf') for indefinite runtime
 
 # ========== CLIENT CONFIGURATION ==========
 CLIENT_SERVER_HOST = "154.176.96.42"
@@ -23,7 +23,7 @@ SNAPSHOT_BROADCAST_INTERVAL = 0.05  # seconds between snapshot broadcasts
 LAST_K_ACTIONS = 20  # number of recent actions to include in snapshots
 
 # ========== GRID CONFIGURATION ==========
-GRID_SIZE = 25  # 20x20 grid
+GRID_SIZE = 20  # 20x20 grid
 MAX_PLAYERS = 4  # maximum number of concurrent players
 
 # ========== SOCKET CONFIGURATION ==========
