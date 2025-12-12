@@ -4,7 +4,7 @@ import time
 import threading
 from util import pack_header, pack_actions_payload, MSG_INIT, MSG_ACTION, MSG_SNAPSHOT, MSG_ACK, MSG_HEARTBEAT, check_auth
 from game import GridGame
-from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, HEARTBEAT_INTERVAL, HEARTBEAT_TIMEOUT, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT, PACKET_LIFETIME, MAX_PLAYERS
+from config import SERVER_HOST, SERVER_PORT, SERVER_RUN_DURATION, SNAPSHOT_BROADCAST_INTERVAL, LAST_K_ACTIONS, GRID_SIZE, SOCKET_TIMEOUT, PACKET_LIFETIME, MAX_PLAYERS
 
 SERVER_ADDR = (SERVER_HOST, SERVER_PORT)
 
@@ -87,6 +87,18 @@ def _process_existing_client_packet(sock, addr, data, msg_type, heartbeat_id, se
 
     if msg_type == MSG_ACTION:
         _handle_action_message(player_id, data)
+        
+    elif msg_type == MSG_HEARTBEAT:
+        # Client sent heartbeat (unidirectional): update last heartbeat receive time
+        client_data['last_heartbeat_recv'] = time.time()
+        # Reply with ACK that contains same heartbeat id in snapshot_id field
+        header = pack_header(MSG_ACK, heartbeat_id, client_data['seq_num'], 0)
+        try:
+            sock.sendto(header, addr)
+            client_data['seq_num'] += 1
+        except Exception:
+            pass
+
     
 
 
