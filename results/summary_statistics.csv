@@ -1,2 +1,0 @@
-Scenario,Avg Latency (ms),Avg Jitter (ms),Avg Ping (ms),Packet Loss (%),Packets Received,Avg CPU (%)
-Baseline,0.39,0.44,0.53,0.00,427,13.90
