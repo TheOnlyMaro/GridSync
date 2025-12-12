@@ -30,8 +30,9 @@ def _register_client(addr):
         'last_recv_seq': 0,
         'last_seen': time.time(),
         'last_heartbeat_recv': time.time(),
-        'state': 'inactive'  # start as inactive until first ack
+        'state': 'pending'  # pending → active after ACK
     }
+    print(f"[SERVER] Registered new client {addr} as Player {player_id}, pending ack")
     return clients[addr], player_id
 
 
@@ -65,10 +66,20 @@ def _process_existing_client_packet(sock, addr, data, msg_type, heartbeat_id, se
     # accept and update last recv seq
     client_data['last_recv_seq'] = seq_num
 
+    if client_data.get('state') == 'pending':
+        # Only accept ACK to activate from pending state
+        if msg_type == MSG_ACK:
+            client_data['state'] = 'active'
+            client_data['last_seen'] = time.time()
+            print(f"[SERVER] Received ACK from Player {player_id} → activated")
+        return
+
     # If client is inactive and sends anything, deliver full actions snapshot (do not re-activate)
     if client_data.get('state') == 'inactive':
         print(f"[SERVER] Inactive client {player_id} sent data — sending full actions snapshot")
         _send_full_snapshot_to_client(sock, addr, client_data)
+        client_data['last_seen'] = time.time()
+        client_data['state'] = 'pending'  # remain inactive
         return
 
     # For active clients, update last_seen
@@ -76,12 +87,7 @@ def _process_existing_client_packet(sock, addr, data, msg_type, heartbeat_id, se
 
     if msg_type == MSG_ACTION:
         _handle_action_message(player_id, data)
-    elif msg_type == MSG_ACK:
-        # ACK from client if first full snapshot - update last_seen and activate
-        client_data['last_seen'] = time.time()
-        if client_data.get('state') == 'inactive':
-            client_data['state'] = 'active'
-            print(f"[SERVER] Received ACK from Player {player_id} → activated")
+    
 
 
 def _handle_action_message(player_id, data):
@@ -163,6 +169,11 @@ def broadcast_snapshots(sock):
             if(clients[addr].get('state') == 'inactive'):
                 inactiveClients += 1
                 continue  # Skip inactive clients
+            
+            elif(clients[addr].get('state') == 'pending'):
+                _send_full_snapshot_to_client(sock, addr, clients[addr])
+                continue  # Skip pending clients until they ACK
+
             header = pack_header(MSG_SNAPSHOT, snapshot_id, clients[addr]['seq_num'], len(payload))
             sock.sendto(header + payload, addr)
             clients[addr]['seq_num'] += 1

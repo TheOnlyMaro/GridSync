@@ -204,7 +204,8 @@ class Client:
                 # check timeout
                 if now - self.last_heartbeat_ack > self.heartbeat_timeout:
                     self.state = 'disconnected'
-            else:
+                    logger.warning('heartbeat timeout — disconnected from server')
+            elif self.state == 'disconnected':
                 # attempt to connect
                 self.send_init()
             time.sleep(self.heartbeat_interval)
@@ -231,11 +232,8 @@ class Client:
                     handled_hb = True
 
         if not handled_hb:
-            prior_state = self.state
-            self.state = 'fetching data'
-            if prior_state in ('connecting', 'disconnected'):
-                self.last_heartbeat_ack = time.time()
-            logger.info(f'ACK received (generic) snapshot(heartbeat_id)={snapshot_id}')
+            self.state = 'connecting'  # remain connecting until full snapshot
+            logger.info(f'ACK received (for INIT) snapshot={snapshot_id}')
 
     def _handle_snapshot(self, data, snapshot_id, seq_num):
         """Apply an incoming SNAPSHOT payload to the local grid."""
@@ -245,9 +243,15 @@ class Client:
             self.state = 'connected'
             self.send_ack()
         
-        if self.state != 'connected':
+        # Client timed out
+        if self.state == 'disconnected':
             self.send_init()
             return
+
+        # Client connecting - awaits full snapshot
+        if self.state == 'connecting':
+            return
+        
 
         # drop redundant snapshots unless full snapshot (MAXFOURBYTE)
         if snapshot_id <= self.last_snapshot_id and snapshot_id != MAXFOURBYTE:
