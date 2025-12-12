@@ -11,11 +11,11 @@ SERVER_RUN_DURATION = 20  # seconds; set to float('inf') for indefinite runtime
 # ========== CLIENT CONFIGURATION ==========
 CLIENT_SERVER_HOST = "154.176.96.42"
 CLIENT_SERVER_PORT = 9999
-CLIENT_HEARTBEAT_INTERVAL = 1.0  # seconds between heartbeat sends
+CLIENT_HEARTBEAT_INTERVAL = 0.5  # seconds between heartbeat sends
 CLIENT_HEARTBEAT_TIMEOUT = 3.0  # seconds before disconnection if no ACK
 
 # ========== PROTOCOL CONFIGURATION ==========
-HEARTBEAT_INTERVAL = 0.05  # seconds; server-side heartbeat broadcast interval
+HEARTBEAT_INTERVAL = 0.5  # seconds; server-side heartbeat broadcast interval
 HEARTBEAT_TIMEOUT = 3.0  # seconds; server marks client inactive if no ACK in this time
 
 # ========== SNAPSHOT & ACTION UPDATES ==========

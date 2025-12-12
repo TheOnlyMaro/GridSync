@@ -79,8 +79,7 @@ class GameUI:
         # Create top-left stats display (ping & packet loss)
         self.stats_text = tk.StringVar(value='Ping: -- | Loss: --%')
         self.stats_label = tk.Label(self.top_frame, textvariable=self.stats_text, fg='white', bg='black', font=('mono', 9), justify='left')
-        #self.stats_label.place(x=5, y=5)
-        self.stats_label.pack(pady=(12,0))
+        self.stats_label.pack(padx=35,pady=(12,0))
 
 
         self.canvas = tk.Canvas(self.grid_frame, width=CANVAS_SIZE, height=CANVAS_SIZE, bg='white')
@@ -149,8 +148,8 @@ class GameUI:
         self.root.after(1000, self.update_stats_loop)
 
     def update_game_loop(self):
-        #if not self.updating:
-            #return
+        if not self.updating:
+            return
         # update grid from client data — only redraw cells when a new snapshot arrived
         if self.client and self.prev_grid is not None:
             last_ts = getattr(self.client, 'last_grid_update', 0.0)
