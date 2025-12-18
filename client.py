@@ -269,6 +269,10 @@ class Client:
 
     def _handle_snapshot(self, data, snapshot_id, seq_num, timestamp_ms, now_ms):
         """Apply an incoming SNAPSHOT payload to the local grid."""
+        
+        # Log metrics to CSV FIRST, before any early returns
+        # This ensures ALL valid snapshots are logged for monitoring
+        self._log_metrics_to_csv(snapshot_id, seq_num, timestamp_ms, now_ms)
             
         if snapshot_id == MAXFOURBYTE:
             logger.info(f'FULL SNAPSHOT received id={snapshot_id} seq={seq_num}')
@@ -311,9 +315,6 @@ class Client:
         # mark when we last applied a grid snapshot so UI can redraw promptly
         self.last_grid_update = time.time()
         logger.info(f'SNAPSHOT received id={snapshot_id} seq={seq_num} actions={count if payload else 0}')
-
-        # Log metrics to CSV
-        self._log_metrics_to_csv(snapshot_id, seq_num, timestamp_ms, now_ms)
 
     def _log_metrics_to_csv(self, snapshot_id, seq_num, server_timestamp_ms, recv_time_ms):
         """Log metrics to CSV file when a SNAPSHOT is received."""
