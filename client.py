@@ -281,7 +281,7 @@ class Client:
             return
 
         # Client connecting - awaits full snapshot
-        if self.state == 'connecting':
+        if self.state == 'connecting' and snapshot_id != MAXFOURBYTE:
             return
         
 
