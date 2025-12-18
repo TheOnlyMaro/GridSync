@@ -127,6 +127,10 @@ class Client:
     def start(self):
         if self.running:
             return
+        # Initialize CSV file at startup
+        with self.csv_lock:
+            self._init_csv_file()
+        
         self.running = True
         threading.Thread(target=self._listen_loop, daemon=True).start()
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
@@ -246,6 +250,23 @@ class Client:
             self.state = 'connecting'  # remain connecting until full snapshot
             logger.info(f'ACK received (for INIT) snapshot={snapshot_id}')
 
+    def _init_csv_file(self):
+        """Initialize CSV file with headers at startup."""
+        if not self.csv_initialized:
+            file_exists = os.path.exists(self.csv_file)
+            with open(self.csv_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow([
+                        'timestamp_ms', 'client_id', 'snapshot_id', 'seq_num',
+                        'server_timestamp_ms', 'recv_time_ms', 'latency_ms',
+                        'jitter_ms', 'packets_received', 'packets_lost',
+                        'loss_percentage', 'ping_ms'
+                    ])
+                f.flush()
+                os.fsync(f.fileno())
+            self.csv_initialized = True
+
     def _handle_snapshot(self, data, snapshot_id, seq_num, timestamp_ms, now_ms):
         """Apply an incoming SNAPSHOT payload to the local grid."""
             
@@ -298,19 +319,7 @@ class Client:
         """Log metrics to CSV file when a SNAPSHOT is received."""
         with self.csv_lock:
             if not self.csv_initialized:
-                file_exists = os.path.exists(self.csv_file)
-                with open(self.csv_file, 'a', newline='') as f:
-                    writer = csv.writer(f)
-                    if not file_exists:
-                        writer.writerow([
-                            'timestamp_ms', 'client_id', 'snapshot_id', 'seq_num',
-                            'server_timestamp_ms', 'recv_time_ms', 'latency_ms',
-                            'jitter_ms', 'packets_received', 'packets_lost',
-                            'loss_percentage', 'ping_ms'
-                        ])
-                    f.flush()  # ADD THIS LINE
-                    os.fsync(f.fileno())  # ADD THIS LINE TOO
-                self.csv_initialized = True
+                self._init_csv_file()
 
             timestamp_ms = int(time.time() * 1000)
             latency_ms = recv_time_ms - server_timestamp_ms
@@ -336,6 +345,8 @@ class Client:
                     jitter_ms, packets_received, packets_lost,
                     loss_percentage, ping_ms
                 ])
+                f.flush()
+                os.fsync(f.fileno())
 
   
 

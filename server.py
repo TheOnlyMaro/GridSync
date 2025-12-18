@@ -170,23 +170,30 @@ def handle_client(sock):
 
 
 
+def _init_csv_file():
+    """Initialize CSV file with headers at startup."""
+    global csv_file, csv_initialized
+    
+    if not csv_initialized:
+        file_exists = os.path.exists(csv_file)
+        with open(csv_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            if not file_exists:
+                writer.writerow([
+                    'timestamp_ms', 'snapshot_id', 'active_clients',
+                    'total_actions', 'cpu_percent'
+                ])
+            f.flush()
+            os.fsync(f.fileno())
+        csv_initialized = True
+
 def _log_server_metrics_to_csv(snapshot_id, active_clients, total_actions):
     """Log server metrics to CSV file."""
     global csv_file, csv_initialized, csv_lock
 
     with csv_lock:
         if not csv_initialized:
-            file_exists = os.path.exists(csv_file)
-            with open(csv_file, 'a', newline='') as f:
-                writer = csv.writer(f)
-                if not file_exists:
-                    writer.writerow([
-                        'timestamp_ms', 'snapshot_id', 'active_clients',
-                        'total_actions', 'cpu_percent'
-                    ])
-                f.flush()  # ADD THIS LINE
-                os.fsync(f.fileno())  # ADD THIS LINE TOO
-            csv_initialized = True
+            _init_csv_file()
 
         timestamp_ms = int(time.time() * 1000)
         cpu_percent = psutil.cpu_percent()
@@ -197,6 +204,8 @@ def _log_server_metrics_to_csv(snapshot_id, active_clients, total_actions):
                 timestamp_ms, snapshot_id, active_clients,
                 total_actions, cpu_percent
             ])
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def broadcast_snapshots(sock):
@@ -233,11 +242,15 @@ def broadcast_snapshots(sock):
         
         print(f"[SERVER] Sent SNAPSHOT #{snapshot_id} to {len(clients) - inactiveClients} clients (actions: {len(recent_actions)})")
 
-          # Log metrics to CSV
-        _log_server_metrics_to_csv(snapshot_id, active_count, len(game.actions))
+        # Log metrics to CSV
+        _log_server_metrics_to_csv(snapshot_id, len(clients), len(game.actions))
 
 def main():
     global running
+    # Initialize CSV file at startup
+    with csv_lock:
+        _init_csv_file()
+    
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(SERVER_ADDR)
     sock.settimeout(SOCKET_TIMEOUT)
