@@ -213,11 +213,6 @@ def broadcast_snapshots(sock):
     last_payload = None
     while running:
         time.sleep(SNAPSHOT_BROADCAST_INTERVAL)
-        
-        # Log metrics to CSV at start of each interval, before any early returns
-        # This ensures continuous logging regardless of client state
-        _log_server_metrics_to_csv(snapshot_id, len(clients), len(game.actions))
-        
         if not clients:
             continue
         
@@ -246,6 +241,9 @@ def broadcast_snapshots(sock):
             clients[addr]['seq_num'] += 1
         
         print(f"[SERVER] Sent SNAPSHOT #{snapshot_id} to {len(clients) - inactiveClients} clients (actions: {len(recent_actions)})")
+
+        # Log metrics to CSV
+        _log_server_metrics_to_csv(snapshot_id, len(clients), len(game.actions))
 
 def main():
     global running
