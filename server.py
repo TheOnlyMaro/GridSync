@@ -210,28 +210,25 @@ def _log_server_metrics_to_csv(snapshot_id, active_clients, total_actions):
 
 def broadcast_snapshots(sock):
     global snapshot_id
-    last_payload = None
     while running:
         time.sleep(SNAPSHOT_BROADCAST_INTERVAL)
         if not clients:
             continue
-        
+
+        # ALWAYS increment snapshot_id so clients don't drop packets as duplicates
+        snapshot_id += 1
+
         # Get the last K actions via game logic
         recent_actions = game.get_recent_actions(LAST_K_ACTIONS)
         # Pack payload using util helper
         payload = pack_actions_payload(recent_actions)
-        
-        # Only increment snapshot_id if payload changed
-        if payload != last_payload:
-            snapshot_id += 1
-            last_payload = payload
-        
+
         inactiveClients = 0
         for addr in clients:
             if(clients[addr].get('state') == 'inactive'):
                 inactiveClients += 1
                 continue  # Skip inactive clients
-            
+
             elif(clients[addr].get('state') == 'pending'):
                 _send_full_snapshot_to_client(sock, addr, clients[addr])
                 continue  # Skip pending clients until they ACK
@@ -239,7 +236,7 @@ def broadcast_snapshots(sock):
             header = pack_header(MSG_SNAPSHOT, snapshot_id, clients[addr]['seq_num'], len(payload))
             sock.sendto(header + payload, addr)
             clients[addr]['seq_num'] += 1
-        
+
         print(f"[SERVER] Sent SNAPSHOT #{snapshot_id} to {len(clients) - inactiveClients} clients (actions: {len(recent_actions)})")
 
         # Log metrics to CSV
