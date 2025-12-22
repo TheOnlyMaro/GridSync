@@ -9,7 +9,7 @@ SERVER_PORT = 9999
 SERVER_RUN_DURATION = 120  # seconds; set to float('inf') for indefinite runtime
 
 # ========== CLIENT CONFIGURATION ==========
-CLIENT_SERVER_HOST = "154.176.96.42"
+CLIENT_SERVER_HOST = "127.0.0.1"
 CLIENT_SERVER_PORT = 9999
 CLIENT_HEARTBEAT_INTERVAL = 0.5  # seconds between heartbeat sends
 CLIENT_HEARTBEAT_TIMEOUT = 3.0  # seconds before disconnection if no ACK
