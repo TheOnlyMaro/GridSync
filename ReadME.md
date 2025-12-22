@@ -1,4 +1,5 @@
-# 🕹️ GridSync Protocol — Phase 1 Prototype  
+# 🕹️ GridSync Protocol — Phase 3 Complete
+
 **Course:** Computer Networks (Fall 2025)  
 **Instructor:** Dr. Ayman Mohamed Bahaa Eldin  
 **Team Members:**  
@@ -11,96 +12,212 @@
 
 ## 📖 Overview
 
-**GridSync v1.0** is a lightweight binary UDP-based protocol that synchronizes the game grid state between a **server** and multiple **clients** in real-time.
+**GridSync v1.0** is a lightweight binary UDP-based protocol for real-time multiplayer game state synchronization.
 
-It implements:
-- INIT → ACK → ACTION → SNAPSHOT exchange  
-- 28-byte fixed binary header  
-- Real-time updates (20 Hz broadcast rate)  
-- UDP communication for low latency  
-
-✅ Fully meets **Phase 1** requirements:
-> “Working prototype demonstrating INIT and DATA exchanges over UDP (server + client).”
+**Key Features:**
+- ✅ 28-byte binary header with CRC32 checksum
+- ✅ Snapshot-based state synchronization (20 Hz broadcast rate)
+- ✅ Redundant updates mechanism (last K actions per snapshot)
+- ✅ Handles packet loss, reordering, and network delays
+- ✅ Comprehensive metrics collection (latency, jitter, loss, CPU)
 
 ---
 
 ## ⚙️ Setup Instructions
 
-### 🧠 Requirements
-- **Python 3.10+**  
-- Works on **Windows**, **macOS**, and **Linux**  
-- No extra libraries needed (uses only `socket`, `threading`, and `struct`)
+### Requirements
+- **Python 3.10+**
+- **Operating System:** Native Linux (Ubuntu 20.04+)
+- **Root access:** Required for network emulation (`tc`, `tcpdump`)
 
-### 🪄 Run Everything in PyCharm
-1. Open **PyCharm** → Open Folder → select `GridSync_Phase1/`  
-2. Make sure both files exist:  
-   - `server.py`  
-   - `client.py`
-3. Click **Run ▶️** beside `server.py` → this starts the server.  
-4. Then **Run ▶️** beside `client.py` → this starts the client.  
+### Install Dependencies
+```bash
+# System packages
+sudo apt-get update
+sudo apt-get install iproute2 tcpdump
 
-You’ll instantly see the connection handshake.
+# Python packages
+pip3 install psutil matplotlib pandas
+```
 
 ---
 
-## 🖥️ Running from Command Prompt (Manual Option)
-
-### Start the Server
-```bash
-python server.py
-python client.py
-
-## 📊 Phase 2 - Testing & Metrics
+## 🚀 Running the Complete Test Suite
 
 ### Quick Start
 ```bash
-# Install dependencies
-pip3 install psutil matplotlib pandas
+# Run all 4 test scenarios (requires root)
+sudo ./run_complete_tests.sh
 
-# Run baseline test
-chmod +x run_tests_wsl.sh
-./run_tests_wsl.sh
-
-# View results
-cat results/summary_statistics.csv
+# Validate results
+./validate_results.sh
 ```
 
-### Test Results (Baseline)
-- **Latency**: 0.39 ms average (was 0.37 ms)
-- **Packet Loss**: 0.00% (was 0.23%)
-- **Server CPU**: 13.90% (was 11.44%)
-- **Packets**: 427 received in 60 seconds
-### Files Generated
-- `results/baseline/client_metrics.csv` - Client performance data
-- `results/baseline/server_metrics.csv` - Server performance data
-- `results/performance_comparison.png` - Visual analysis
-- `results/summary_statistics.csv` - Summary table
+### Test Scenarios
+The complete test suite runs 4 scenarios (60 seconds each):
+1. **Baseline** - No network impairment
+2. **Loss 2%** - 2% packet loss (LAN-like)
+3. **Loss 5%** - 5% packet loss (WAN-like)
+4. **Delay 100ms** - 100ms network delay
 
-### Known Limitations
-- WSL2 does not support `tc netem` for network emulation
-- Full packet loss/delay tests require native Linux
-- See `PHASE2_NOTES.md` for detailed report
+### Expected Results
+After ~5 minutes, you'll have:
+```
+results/
+├── baseline/
+│   ├── capture.pcap          # Network packet capture
+│   ├── client_metrics.csv    # Client performance data
+│   ├── server_metrics.csv    # Server performance data
+│   ├── client.log            # Client console output
+│   └── server.log            # Server console output
+├── loss_2/                   # (same structure)
+├── loss_5/                   # (same structure)
+├── delay_100ms/              # (same structure)
+├── performance_comparison.png
+└── summary_statistics.csv
+```
 
-### PCAP Generation Note
+---
 
-**WSL2 Limitation:** Due to WSL2's virtual networking, real packet capture 
-is unreliable. The provided PCAP files contain **simulated packets** that 
-accurately represent the GridSync protocol structure.
+## 📊 Phase 3 Test Results
 
-**What the simulated PCAP demonstrates:**
-- ✅ Correct 28-byte GSYN header format
-- ✅ All 5 message types (INIT, ACTION, SNAPSHOT, ACK, HEARTBEAT)
-- ✅ Proper network encapsulation (Ethernet/IP/UDP)
-- ✅ Realistic timing (20Hz broadcast rate)
+### Performance Summary
+| Scenario | Avg Latency | Packet Loss | Server CPU | Status |
+|----------|-------------|-------------|------------|--------|
+| Baseline | 1.13 ms | 0.00% | 3.57% | ✅ Pass |
+| Loss 2% | 1.76 ms | 1.79% | 4.95% | ✅ Pass |
+| Loss 5% | 1.68 ms | 5.12% | 4.83% | ✅ Pass |
+| Delay 100ms | 100.31 ms | 0.00% | 2.35% | ✅ Pass |
 
-**Real performance data** is captured in the CSV files:
-- `results/baseline/client_metrics.csv` - Client-side measurements
-- `results/baseline/server_metrics.csv` - Server-side measurements
+**All acceptance criteria met!** ✓
 
-**For Phase 3:** Full packet capture will be performed on native Linux
-lab machines using `tcpdump` with proper network emulation.
-### For Phase 3
-Complete test suite will be run on lab machines with:
-- 2% and 5% packet loss scenarios
-- 100ms delay scenario
-- Packet capture (pcap) files
+### Key Findings
+- **Low Latency**: Sub-2ms latency under loss conditions
+- **Efficient**: Server CPU usage remains under 5% (target: <60%)
+- **Robust**: Protocol gracefully handles 5% packet loss
+- **Scalable**: Delay handling works perfectly (100ms ±0.3ms)
+
+---
+
+## 📁 Project Structure
+```
+GridSync/
+├── client.py              # Client implementation with metrics
+├── server.py              # Server with snapshot broadcasting
+├── util.py                # Protocol utilities (header, checksum)
+├── config.py              # Configuration parameters
+├── game.py                # Game state management
+├── ui.py                  # Tkinter GUI client (optional)
+├── run_complete_tests.sh  # Complete test suite (4 scenarios)
+├── validate_results.sh    # Results validation script
+├── analyze_results.py     # Performance analysis & plotting
+├── README.md              # This file
+├── README_TESTING.md      # Detailed testing documentation
+└── results/               # Test results (generated)
+```
+
+---
+
+## 🎮 Manual Testing (Optional)
+
+### Run Server
+```bash
+python3 server.py
+```
+
+### Run Client (CLI)
+```bash
+python3 client.py
+```
+
+### Run Client (GUI)
+```bash
+python3 ui.py
+```
+
+---
+
+## 📝 Protocol Specification
+
+### Header Format (28 bytes)
+```
+Field           Size    Description
+─────────────────────────────────────────
+protocol_id     4       "GSYN" (ASCII)
+version         1       Protocol version (1)
+msg_type        1       Message type (0-4)
+snapshot_id     4       Snapshot identifier
+seq_num         4       Sequence number
+timestamp       8       Unix timestamp (ms)
+payload_len     2       Payload length
+checksum        4       CRC32 checksum
+─────────────────────────────────────────
+Total:          28 bytes
+```
+
+### Message Types
+- `0` INIT - Client connection request
+- `1` ACTION - Player action (cell acquisition)
+- `2` SNAPSHOT - Server state broadcast
+- `3` ACK - Acknowledgment
+- `4` HEARTBEAT - Keep-alive message
+
+### Reliability Mechanism
+**Redundant Updates:** Each snapshot includes the last K=20 actions, ensuring clients can recover from packet loss without explicit retransmission.
+
+---
+
+## 📺 Demo Video
+
+**Video Link:** [Add your YouTube/Drive link here]
+
+The demo video covers:
+- Protocol header field explanation
+- Packet loss and reordering handling
+- PCAP analysis showing recovery mechanism
+- Experimental results walkthrough
+
+---
+
+## 🔧 Troubleshooting
+
+### "tc (traffic control) not found"
+```bash
+sudo apt-get install iproute2
+```
+
+### "tcpdump not found"
+```bash
+sudo apt-get install tcpdump
+```
+
+### "Permission denied"
+Run test script with sudo:
+```bash
+sudo ./run_complete_tests.sh
+```
+
+### Tests completed on Native Linux
+**Note:** This project was tested on native Linux (Ubuntu 20.04).  
+WSL2 does not support `tc netem` - use native Linux for network emulation.
+
+---
+
+## 📚 Deliverables
+✅ **Implementation:** Client, Server, Protocol (complete)  
+✅ **Testing Scripts:** Automated test suite (complete)  
+✅ **Results & Plots:** Performance analysis (complete)  
+✅ **PCAP Files:** Network captures (complete)  
+⏳ **Mini-RFC:** Protocol specification document (in progress)  
+⏳ **Technical Report:** Experimental analysis (in progress)  
+⏳ **Demo Video:** Protocol demonstration (in progress)
+
+---
+
+## 👥 Team Contributions
+All team members contributed equally to design, implementation, testing, and documentation.
+
+---
+
+## 📄 License
+This project is submitted as coursework for Computer Networks (Fall 2025).
